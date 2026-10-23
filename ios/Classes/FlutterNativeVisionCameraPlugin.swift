@@ -157,84 +157,124 @@ public class SwiftFlutterNativeVisionCameraPlugin: NSObject, FlutterPlugin {
     // MARK: - Device Discovery
 
     private func getAvailableCameraDevices(result: @escaping FlutterResult) {
-        var deviceTypes: [AVCaptureDevice.DeviceType] = [
-            .builtInWideAngleCamera,
-            .builtInTelephotoCamera,
-            .builtInUltraWideCamera,
-        ]
+        var deviceTypes: [AVCaptureDevice.DeviceType] = []
 
+        // 1. COMPOSITE / LOGICAL CAMERAS (Highest Priority)
+        // These enable seamless zooming across multiple physical lenses.
         if #available(iOS 13.0, *) {
-            deviceTypes.append(.builtInDualCamera)
-            deviceTypes.append(.builtInTripleCamera)
-            deviceTypes.append(.builtInDualWideCamera)
+            deviceTypes.append(.builtInTripleCamera)     // 0.5x, 1x, 2x/3x/5x seamless zoom
+            deviceTypes.append(.builtInDualWideCamera)   // 0.5x, 1x seamless zoom
         }
 
-        // External cameras (USB-C / Continuity) are supported from iOS 17.
+        // Older dual-lens composite (1x, 2x zoom)
+        deviceTypes.append(.builtInDualCamera)
+
+        // Best front-facing camera (Enables depth data and FaceID sensors)
+        if #available(iOS 11.1, *) {
+            deviceTypes.append(.builtInTrueDepthCamera)
+        }
+
+        // 2. PHYSICAL / SINGLE CAMERAS (Fallbacks)
+        // If the device doesn't have the composite cameras above, it falls back to these.
+        if #available(iOS 13.0, *) {
+            deviceTypes.append(.builtInUltraWideCamera)
+        }
+        deviceTypes.append(.builtInTelephotoCamera)
+        deviceTypes.append(.builtInWideAngleCamera)      // The universal fallback every iOS device has
+
+        // 3. EXTERNAL CAMERAS
+        // iOS/iPadOS 17 introduced support for plug-and-play USB-C webcams.
         if #available(iOS 17.0, *) {
             deviceTypes.append(.external)
         }
+
+        // Note on Continuity Camera:
+        // On iOS/iPadOS, Continuity Camera is handled implicitly by the system when a Mac connects to it.
+        // If you are compiling for tvOS or macOS, you would also append `.continuityCamera` here,
+        // but it is not exposed as a distinct DeviceType on the iOS SDK.
 
         let discoverySession = AVCaptureDevice.DiscoverySession(
             deviceTypes: deviceTypes,
             mediaType: .video,
             position: .unspecified
         )
-
-        let devices = discoverySession.devices.map { device -> [String: Any?] in
-            let position: String
-            switch device.position {
-            case .front: position = "front"
-            case .back: position = "back"
-            default: position = "external"
+        
+        let allDevices = discoverySession.devices
+        var allDeviceIds = Set(allDevices.map { $0.uniqueID })
+        
+        for device in allDevices {
+            for constituent in device.constituentDevices {
+                if constituent.uniqueID != device.uniqueID {
+                    allDeviceIds.remove(constituent.uniqueID)
+                }
             }
+        }
+        
+        let devices =
+            allDevices
+            .filter { allDeviceIds.contains($0.uniqueID) }
+            .map { device -> [String: Any?] in
+                let position = switch device.position {
+                    case .front: "front"
+                    case .back: "back"
+                    default: "external"
+                }
 
-            let formats: [[String: Any?]] = device.formats.compactMap { format in
-                let desc = format.formatDescription
-                let dims = CMVideoFormatDescriptionGetDimensions(desc)
-                let fpsRanges = format.videoSupportedFrameRateRanges
+                let formats: [[String: Any?]] = device.formats.compactMap { format in
+                    let desc = format.formatDescription
+                    let dims = CMVideoFormatDescriptionGetDimensions(desc)
+                    let fpsRanges = format.videoSupportedFrameRateRanges
+
+                    return [
+                        "photoHeight": Int(dims.height),
+                        "photoWidth": Int(dims.width),
+                        "videoHeight": Int(dims.height),
+                        "videoWidth": Int(dims.width),
+                        "minFps": fpsRanges.map { $0.minFrameRate }.min() ?? 1.0,
+                        "maxFps": fpsRanges.map { $0.maxFrameRate }.max() ?? 30.0,
+                        "minISO": device.activeFormat.minISO,
+                        "maxISO": device.activeFormat.maxISO,
+                        "fieldOfView": format.videoFieldOfView,
+                        "maxZoom": format.videoMaxZoomFactor,
+                        "supportsVideoHdr": format.isVideoHDRSupported,
+                        "supportsPhotoHdr": false,
+                        "supportsDepthCapture": !format.supportedDepthDataFormats.isEmpty,
+                        "autoFocusSystem": format.autoFocusSystem == .phaseDetection
+                            ? "phase-detection" : "contrast-detection",
+                        "videoStabilizationModes": ["off"], // Simplified
+                        "pixelFormats": ["rgb"],
+                    ]
+                }
 
                 return [
-                    "photoHeight": Int(dims.height),
-                    "photoWidth": Int(dims.width),
-                    "videoHeight": Int(dims.height),
-                    "videoWidth": Int(dims.width),
-                    "minFps": fpsRanges.map { $0.minFrameRate }.min() ?? 1.0,
-                    "maxFps": fpsRanges.map { $0.maxFrameRate }.max() ?? 30.0,
-                    "minISO": device.activeFormat.minISO,
-                    "maxISO": device.activeFormat.maxISO,
-                    "fieldOfView": format.videoFieldOfView,
-                    "maxZoom": format.videoMaxZoomFactor,
-                    "supportsVideoHdr": format.isVideoHDRSupported,
-                    "supportsPhotoHdr": false,
-                    "supportsDepthCapture": !format.supportedDepthDataFormats.isEmpty,
-                    "autoFocusSystem": format.autoFocusSystem == .phaseDetection
-                        ? "phase-detection" : "contrast-detection",
-                    "videoStabilizationModes": ["off"], // Simplified
-                    "pixelFormats": ["rgb"],
+                    "id": device.uniqueID,
+                    "name": device.localizedName,
+                    "position": position,
+                    "hasFlash": device.hasFlash,
+                    "hasTorch": device.hasTorch,
+                    "isMultiCam": device.constituentDevices.count > 1,
+                    "minZoom": device.minAvailableVideoZoomFactor,
+                    "maxZoom": device.maxAvailableVideoZoomFactor,
+                    "neutralZoom": 1.0,
+                    "minExposure": device.minExposureTargetBias,
+                    "maxExposure": device.maxExposureTargetBias,
+                    "supportsLowLightBoost": device.isLowLightBoostSupported,
+                    "supportsFocus": device.isFocusPointOfInterestSupported,
+                    "minFocusDistance": 0.0,
+                    "hardwareLevel": "full",
+                    "sensorOrientation": "portrait",
+                    "physicalDevices": device.constituentDevices.map { d in
+                        // TODO: Revisit this. It's mostly correct but not sure it's useful.
+                        switch d.deviceType {
+                            case .builtInWideAngleCamera: "wide-angle-camera"
+                            case .builtInUltraWideCamera: "ultra-wide-angle-camera"
+                            case .builtInTelephotoCamera: "telephoto-camera"
+                            default: "wide-angle-camera"
+                        }
+                    },
+                    "formats": formats,
                 ]
             }
-
-            return [
-                "id": device.uniqueID,
-                "name": device.localizedName,
-                "position": position,
-                "hasFlash": device.hasFlash,
-                "hasTorch": device.hasTorch,
-                "isMultiCam": false,
-                "minZoom": device.minAvailableVideoZoomFactor,
-                "maxZoom": device.maxAvailableVideoZoomFactor,
-                "neutralZoom": 1.0,
-                "minExposure": device.minExposureTargetBias,
-                "maxExposure": device.maxExposureTargetBias,
-                "supportsLowLightBoost": device.isLowLightBoostSupported,
-                "supportsFocus": device.isFocusPointOfInterestSupported,
-                "minFocusDistance": 0.0,
-                "hardwareLevel": "full",
-                "sensorOrientation": "portrait",
-                "physicalDevices": ["wide-angle-camera"],
-                "formats": formats,
-            ]
-        }
 
         result(devices)
     }
@@ -277,7 +317,7 @@ public class SwiftFlutterNativeVisionCameraPlugin: NSObject, FlutterPlugin {
             } catch {}
 
             let session = AVCaptureSession()
-            session.sessionPreset = .high
+            session.sessionPreset = .photo
 
             do {
                 let input = try AVCaptureDeviceInput(device: device)

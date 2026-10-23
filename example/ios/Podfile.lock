@@ -1,6 +1,6 @@
 PODS:
   - Flutter (1.0.0)
-  - flutter_native_vision_camera (0.0.5):
+  - flutter_native_vision_camera (0.1.0):
     - Flutter
   - permission_handler_apple (9.3.0):
     - Flutter
@@ -49,13 +49,13 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/tflite_flutter/ios"
 
 SPEC CHECKSUMS:
-  Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
-  flutter_native_vision_camera: 241fc00d5a123d3e560daa047824120dd6af5c03
+  Flutter: 71a624a5bc0c04062bf19101d501e466baf2fb47
+  flutter_native_vision_camera: 484c03be4875e1408c7b8af0a934277b73969378
   permission_handler_apple: 4ed2196e43d0651e8ff7ca3483a069d469701f2d
   TensorFlowLiteC: 20785a69299185a379ba9852b6625f00afd7984a
   TensorFlowLiteSwift: 3a4928286e9e35bdd3e17970f48e53c80d25e793
   tflite_flutter: 64b192e11352fe36943ab6656e1d49207f1a5595
 
-PODFILE CHECKSUM: 3c63482e143d1b91d2d2560aee9fb04ecc74ac7e
+PODFILE CHECKSUM: 3ba3a73b1b12adcf321a227a745625fe0888cc82
 
 COCOAPODS: 1.16.2
